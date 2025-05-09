@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 Snifflyzer - A lightweight network sniffer and analyzer for basic threat detection
+with user-friendly interface
 """
 
 import argparse
@@ -8,11 +9,13 @@ import os
 import time
 import signal
 import sys
+import platform
+import subprocess
 from collections import Counter, defaultdict
 from datetime import datetime
 
 try:
-    from scapy.all import sniff, ARP, IP, TCP, UDP, DNS, DNSQR, DNSRR, rdpcap, wrpcap
+    from scapy.all import sniff, ARP, IP, TCP, UDP, DNS, DNSQR, DNSRR, rdpcap, wrpcap, conf
     import matplotlib.pyplot as plt
 except ImportError:
     print("Required packages not installed. Install with:")
@@ -32,6 +35,37 @@ severity_counts = {"LOW": 0, "MEDIUM": 0, "HIGH": 0}
 # For CTRL+C handling
 sniff_active = True
 
+# Terminal colors
+class Colors:
+    HEADER = '\033[95m'
+    BLUE = '\033[94m'
+    GREEN = '\033[92m'
+    YELLOW = '\033[93m'
+    RED = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+
+def clear_screen():
+    """Clear the terminal screen based on OS"""
+    if platform.system() == "Windows":
+        os.system('cls')
+    else:
+        os.system('clear')
+
+def print_banner():
+    """Print the Snifflyzer banner"""
+    banner = f"""
+{Colors.BLUE}███████╗███╗   ██╗██╗███████╗███████╗██╗  ██╗   ██╗███████╗███████╗██████╗ 
+██╔════╝████╗  ██║██║██╔════╝██╔════╝██║  ╚██╗ ██╔╝██╔════╝██╔════╝██╔══██╗
+███████╗██╔██╗ ██║██║█████╗  █████╗  ██║   ╚████╔╝ ███████╗█████╗  ██████╔╝
+╚════██║██║╚██╗██║██║██╔══╝  ██╔══╝  ██║    ╚██╔╝  ╚════██║██╔══╝  ██╔══██╗
+███████║██║ ╚████║██║██║     ██║     ███████╗██║   ███████║███████╗██║  ██║
+╚══════╝╚═╝  ╚═══╝╚═╝╚═╝     ╚═╝     ╚══════╝╚═╝   ╚══════╝╚══════╝╚═╝  ╚═╝{Colors.ENDC}
+                                                                        
+{Colors.GREEN}🔍 Network Sniffer & Analyzer - Detect threats in real-time 🔍{Colors.ENDC}
+"""
+    print(banner)
 
 def log_threat(source, threat_type, details, severity="MEDIUM"):
     """Log a detected threat with timestamp and severity level"""
@@ -45,6 +79,14 @@ def log_threat(source, threat_type, details, severity="MEDIUM"):
     })
     severity_counts[severity] += 1
     
+    # Color code by severity
+    color = Colors.YELLOW
+    if severity == "HIGH":
+        color = Colors.RED
+    elif severity == "LOW":
+        color = Colors.GREEN
+        
+    print(f"\n{color}[{severity}] {threat_type}: {details} (from {source}){Colors.ENDC}")
 
 def analyze_arp(packet):
     """Detect potential ARP spoofing attacks"""
@@ -62,11 +104,9 @@ def analyze_arp(packet):
                     f"IP {ip_src} changed MAC from {arp_cache[ip_src]} to {mac_src}",
                     "HIGH"
                 )
-                print(f"\033[91m[HIGH] Potential ARP spoofing: {ip_src} MAC changed to {mac_src}\033[0m")
             
             # Update our ARP cache
             arp_cache[ip_src] = mac_src
-
 
 def analyze_dns(packet):
     """Detect potential DNS poisoning and track DNS queries"""
@@ -95,8 +135,6 @@ def analyze_dns(packet):
                     f"Suspicious DNS response for {qname} -> {rdata}",
                     "HIGH"
                 )
-                print(f"\033[91m[HIGH] Potential DNS poisoning: {qname} -> {rdata}\033[0m")
-
 
 def analyze_tcp(packet):
     """Analyze TCP packets for suspicious login attempts and unusual behavior"""
@@ -121,7 +159,6 @@ def analyze_tcp(packet):
                     f"Multiple {service} connection attempts to {dst_ip}",
                     "MEDIUM"
                 )
-                print(f"\033[93m[MEDIUM] Potential {service} brute force from {src_ip} to {dst_ip}\033[0m")
             elif attempt_count == 30:
                 log_threat(
                     src_ip, 
@@ -129,8 +166,6 @@ def analyze_tcp(packet):
                     f"Excessive {service} connection attempts to {dst_ip}",
                     "HIGH"
                 )
-                print(f"\033[91m[HIGH] Excessive {service} connection attempts from {src_ip} to {dst_ip}\033[0m")
-
 
 def packet_callback(packet):
     """Process each packet captured"""
@@ -161,9 +196,8 @@ def packet_callback(packet):
     
     # Print basic packet info every 100 packets
     if total_packets % 100 == 0:
-        sys.stdout.write(f"\rPackets captured: {total_packets} (TCP: {packet_stats['TCP']}, UDP: {packet_stats['UDP']}, DNS: {packet_stats['DNS']}, ARP: {packet_stats['ARP']}, Other: {packet_stats['Other']})")
+        sys.stdout.write(f"\r{Colors.BLUE}Packets captured: {total_packets} (TCP: {packet_stats['TCP']}, UDP: {packet_stats['UDP']}, DNS: {packet_stats['DNS']}, ARP: {packet_stats['ARP']}, Other: {packet_stats['Other']}){Colors.ENDC}")
         sys.stdout.flush()
-
 
 def detect_unusual_traffic():
     """Detect unusual traffic patterns from collected statistics"""
@@ -176,14 +210,14 @@ def detect_unusual_traffic():
                 f"Connected to {len(destinations)} different IPs",
                 "MEDIUM"
             )
-            print(f"\033[93m[MEDIUM] Potential port scanning from {src_ip} ({len(destinations)} destinations)\033[0m")
-
 
 def generate_visualizations(output_dir):
     """Generate visualizations of the collected data"""
     # Create output directory if it doesn't exist
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
+    
+    print(f"\n{Colors.BLUE}Generating visualizations in {output_dir}...{Colors.ENDC}")
     
     # Generate protocol distribution pie chart
     plt.figure(figsize=(10, 6))
@@ -192,7 +226,9 @@ def generate_visualizations(output_dir):
     plt.pie(sizes, labels=labels, autopct='%1.1f%%', startangle=140)
     plt.axis('equal')
     plt.title('Protocol Distribution')
-    plt.savefig(os.path.join(output_dir, 'protocol_distribution.png'))
+    chart_path = os.path.join(output_dir, 'protocol_distribution.png')
+    plt.savefig(chart_path)
+    print(f"{Colors.GREEN}✓ Saved protocol distribution chart to {chart_path}{Colors.ENDC}")
     
     # Generate threat severity distribution
     plt.figure(figsize=(10, 6))
@@ -200,101 +236,340 @@ def generate_visualizations(output_dir):
     sizes = list(severity_counts.values())
     plt.bar(labels, sizes, color=['green', 'orange', 'red'])
     plt.title('Threat Severity Distribution')
-    plt.savefig(os.path.join(output_dir, 'threat_severity.png'))
-
+    threat_path = os.path.join(output_dir, 'threat_severity.png')
+    plt.savefig(threat_path)
+    print(f"{Colors.GREEN}✓ Saved threat severity chart to {threat_path}{Colors.ENDC}")
 
 def print_summary_report():
     """Print a summary report of the sniffing session"""
-    print("\n\n" + "=" * 50)
-    print("SNIFFLYZER SUMMARY REPORT")
-    print("=" * 50)
+    print("\n\n" + "=" * 60)
+    print(f"{Colors.BOLD}{Colors.BLUE}SNIFFLYZER SUMMARY REPORT{Colors.ENDC}")
+    print("=" * 60)
     print(f"Total packets captured: {total_packets}")
     print(f"Session duration: {session_duration:.2f} seconds")
-    print("\nProtocol Distribution:")
+    
+    print(f"\n{Colors.BOLD}Protocol Distribution:{Colors.ENDC}")
     for proto, count in packet_stats.most_common():
         print(f"  {proto}: {count} ({count/max(total_packets, 1)*100:.1f}%)")
     
-    print("\nTop DNS Queries:")
+    print(f"\n{Colors.BOLD}Top DNS Queries:{Colors.ENDC}")
     for domain, count in sorted(dns_queries.items(), key=lambda x: x[1], reverse=True)[:10]:
         print(f"  {domain}: {count}")
     
-    print("\nDetected Threats:")
+    print(f"\n{Colors.BOLD}Detected Threats:{Colors.ENDC}")
     if not suspicious_activities:
-        print("  No threats detected")
+        print(f"  {Colors.GREEN}No threats detected{Colors.ENDC}")
     else:
-        for level in ["HIGH", "MEDIUM", "LOW"]:
+        for level, color in [("HIGH", Colors.RED), ("MEDIUM", Colors.YELLOW), ("LOW", Colors.GREEN)]:
             level_threats = [t for t in suspicious_activities if t["severity"] == level]
             if level_threats:
-                print(f"\n  {level} Severity Threats ({len(level_threats)}):")
+                print(f"\n  {color}{level} Severity Threats ({len(level_threats)}):{Colors.ENDC}")
                 for threat in level_threats:
                     print(f"    [{threat['timestamp']}] {threat['threat_type']} from {threat['source']}: {threat['details']}")
-
 
 def signal_handler(sig, frame):
     """Handle Ctrl+C to gracefully exit the sniffer"""
     global sniff_active
-    print("\n\nStopping packet capture...")
+    print(f"\n\n{Colors.YELLOW}Stopping packet capture...{Colors.ENDC}")
     sniff_active = False
 
+def get_network_interfaces():
+    """Get a list of available network interfaces"""
+    interfaces = []
+    
+    try:
+        # Use scapy's conf.ifaces
+        for iface_name in conf.ifaces:
+            interfaces.append(iface_name)
+    except:
+        # Fallback methods
+        if platform.system() == "Windows":
+            # Windows fallback
+            try:
+                from scapy.arch.windows import get_windows_if_list
+                for iface in get_windows_if_list():
+                    interfaces.append(iface.get('name', 'Unknown'))
+            except:
+                interfaces = ["Ethernet", "Wi-Fi"]  # Default fallback
+        else:
+            # Linux/Mac fallback
+            try:
+                output = subprocess.check_output(["ifconfig"]).decode('utf-8')
+                interfaces = [line.split(':')[0] for line in output.split('\n') if ':' in line]
+            except:
+                try:
+                    output = subprocess.check_output(["ip", "link", "show"]).decode('utf-8')
+                    interfaces = [line.split(':')[1].strip() for line in output.split('\n') if ':' in line and not line.startswith(' ')]
+                except:
+                    interfaces = ["eth0", "wlan0"]  # Default fallback
+    
+    return list(set(interfaces))  # Remove duplicates
+
+def interactive_menu():
+    """Interactive menu for user to select options"""
+    clear_screen()
+    print_banner()
+    
+    print("\n" + "=" * 60)
+    print(f"{Colors.BOLD}SETUP YOUR CAPTURE SESSION{Colors.ENDC}")
+    print("=" * 60)
+    
+    # Get available interfaces
+    interfaces = get_network_interfaces()
+    
+    # Option 1: Select interface
+    print(f"\n{Colors.BOLD}[1] Select Network Interface:{Colors.ENDC}")
+    for i, iface in enumerate(interfaces):
+        print(f"    {i+1}. {iface}")
+    print(f"    {len(interfaces)+1}. Any interface (default)")
+    
+    while True:
+        try:
+            iface_choice = input(f"\n{Colors.GREEN}Choose interface [1-{len(interfaces)+1}]: {Colors.ENDC}")
+            if not iface_choice:
+                selected_iface = None
+                break
+            
+            iface_idx = int(iface_choice) - 1
+            if 0 <= iface_idx < len(interfaces):
+                selected_iface = interfaces[iface_idx]
+                break
+            elif iface_idx == len(interfaces):
+                selected_iface = None
+                break
+            else:
+                print(f"{Colors.RED}Invalid choice. Please try again.{Colors.ENDC}")
+        except ValueError:
+            print(f"{Colors.RED}Please enter a number.{Colors.ENDC}")
+    
+    # Option 2: Capture limit
+    print(f"\n{Colors.BOLD}[2] Capture Limit:{Colors.ENDC}")
+    print("    How many packets do you want to capture?")
+    print("    (Enter 0 for unlimited)")
+    
+    while True:
+        try:
+            count = input(f"\n{Colors.GREEN}Enter packet count [0]: {Colors.ENDC}")
+            if not count:
+                count = 0
+                break
+            count = int(count)
+            if count >= 0:
+                break
+            else:
+                print(f"{Colors.RED}Please enter a non-negative number.{Colors.ENDC}")
+        except ValueError:
+            print(f"{Colors.RED}Please enter a valid number.{Colors.ENDC}")
+    
+    # Option 3: Timeout
+    print(f"\n{Colors.BOLD}[3] Capture Duration:{Colors.ENDC}")
+    print("    How long do you want to capture (in seconds)?")
+    print("    (Enter 0 for no timeout)")
+    
+    while True:
+        try:
+            timeout = input(f"\n{Colors.GREEN}Enter timeout in seconds [0]: {Colors.ENDC}")
+            if not timeout:
+                timeout = 0
+                break
+            timeout = int(timeout)
+            if timeout >= 0:
+                break
+            else:
+                print(f"{Colors.RED}Please enter a non-negative number.{Colors.ENDC}")
+        except ValueError:
+            print(f"{Colors.RED}Please enter a valid number.{Colors.ENDC}")
+    
+    # Option 4: BPF Filter
+    print(f"\n{Colors.BOLD}[4] Packet Filter:{Colors.ENDC}")
+    print("    Enter a BPF filter expression (optional)")
+    print("    Examples:")
+    print("      - tcp port 80          (HTTP traffic)")
+    print("      - udp port 53          (DNS traffic)")
+    print("      - tcp port 22          (SSH traffic)")
+    print("      - host 192.168.1.1     (Traffic to/from this IP)")
+    
+    filter_expr = input(f"\n{Colors.GREEN}Enter filter [none]: {Colors.ENDC}")
+    if not filter_expr:
+        filter_expr = None
+    
+    # Option 5: Save PCAP
+    print(f"\n{Colors.BOLD}[5] Save PCAP File:{Colors.ENDC}")
+    print("    Do you want to save captured packets to a PCAP file?")
+    
+    save_pcap = input(f"\n{Colors.GREEN}Save PCAP? [y/N]: {Colors.ENDC}").lower()
+    if save_pcap == 'y' or save_pcap == 'yes':
+        pcap_filename = input(f"{Colors.GREEN}Enter filename [snifflyzer.pcap]: {Colors.ENDC}")
+        if not pcap_filename:
+            pcap_filename = "snifflyzer.pcap"
+    else:
+        pcap_filename = None
+    
+    # Option 6: Output directory
+    print(f"\n{Colors.BOLD}[6] Output Directory:{Colors.ENDC}")
+    print("    Where should reports and visualizations be saved?")
+    
+    output_dir = input(f"\n{Colors.GREEN}Enter directory [snifflyzer_output]: {Colors.ENDC}")
+    if not output_dir:
+        output_dir = "snifflyzer_output"
+    
+    # Confirm settings
+    clear_screen()
+    print_banner()
+    print("\n" + "=" * 60)
+    print(f"{Colors.BOLD}CAPTURE SETTINGS{Colors.ENDC}")
+    print("=" * 60)
+    print(f"Interface: {selected_iface or 'Any interface'}")
+    print(f"Packet limit: {'Unlimited' if count == 0 else count}")
+    print(f"Duration: {'No timeout' if timeout == 0 else f'{timeout} seconds'}")
+    print(f"Filter: {filter_expr or 'None'}")
+    print(f"PCAP file: {pcap_filename or 'Not saving'}")
+    print(f"Output directory: {output_dir}")
+    
+    confirm = input(f"\n{Colors.GREEN}Start capture with these settings? [Y/n]: {Colors.ENDC}").lower()
+    if confirm == 'n' or confirm == 'no':
+        return interactive_menu()
+    
+    return {
+        'interface': selected_iface,
+        'count': count,
+        'timeout': timeout,
+        'filter': filter_expr,
+        'pcap': pcap_filename,
+        'output': output_dir
+    }
+
+def read_pcap_menu():
+    """Menu for reading from existing PCAP files"""
+    clear_screen()
+    print_banner()
+    
+    print("\n" + "=" * 60)
+    print(f"{Colors.BOLD}READ FROM PCAP FILE{Colors.ENDC}")
+    print("=" * 60)
+    
+    # Get PCAP filename
+    pcap_file = input(f"\n{Colors.GREEN}Enter PCAP filename: {Colors.ENDC}")
+    if not pcap_file:
+        print(f"{Colors.RED}No filename entered. Returning to main menu.{Colors.ENDC}")
+        time.sleep(2)
+        return main_menu()
+    
+    if not os.path.exists(pcap_file):
+        print(f"{Colors.RED}File not found: {pcap_file}. Returning to main menu.{Colors.ENDC}")
+        time.sleep(2)
+        return main_menu()
+    
+    # Output directory
+    output_dir = input(f"\n{Colors.GREEN}Enter output directory [snifflyzer_output]: {Colors.ENDC}")
+    if not output_dir:
+        output_dir = "snifflyzer_output"
+    
+    return {
+        'read': pcap_file,
+        'output': output_dir
+    }
+
+def main_menu():
+    """Main menu for the application"""
+    clear_screen()
+    print_banner()
+    
+    print("\n" + "=" * 60)
+    print(f"{Colors.BOLD}MAIN MENU{Colors.ENDC}")
+    print("=" * 60)
+    print(f"1. Start live packet capture")
+    print(f"2. Analyze existing PCAP file")
+    print(f"3. Exit")
+    
+    choice = input(f"\n{Colors.GREEN}Choose an option [1-3]: {Colors.ENDC}")
+    
+    if choice == '1':
+        return interactive_menu()
+    elif choice == '2':
+        return read_pcap_menu()
+    elif choice == '3':
+        print(f"\n{Colors.BLUE}Thank you for using Snifflyzer! Goodbye.{Colors.ENDC}")
+        sys.exit(0)
+    else:
+        print(f"{Colors.RED}Invalid choice. Please try again.{Colors.ENDC}")
+        time.sleep(1)
+        return main_menu()
 
 def main():
     """Main function to set up and run the sniffer"""
-    parser = argparse.ArgumentParser(description='Snifflyzer - Network Sniffer & Analyzer')
-    parser.add_argument('-i', '--interface', help='Network interface to sniff on')
-    parser.add_argument('-c', '--count', type=int, default=0, help='Number of packets to capture (0 for unlimited)')
-    parser.add_argument('-t', '--timeout', type=int, default=0, help='Timeout in seconds (0 for no timeout)')
-    parser.add_argument('-o', '--output', default='snifflyzer_output', help='Output directory for reports and visualizations')
-    parser.add_argument('-f', '--filter', default='', help='BPF filter to apply (e.g., "tcp port 80")')
-    parser.add_argument('-p', '--pcap', help='Save captured packets to PCAP file')
-    parser.add_argument('-r', '--read', help='Read packets from PCAP file instead of sniffing')
-    
-    args = parser.parse_args()
-    
     global session_duration
-    start_time = time.time()
     
-    print("🔍 Snifflyzer - Network Sniffer & Analyzer 🔍")
-    print("=" * 50)
+    # Show menu and get options
+    options = main_menu()
     
     # Set up signal handler for graceful exit
     signal.signal(signal.SIGINT, signal_handler)
     
+    # Start time for session duration
+    start_time = time.time()
+    
     # Start sniffing or reading from PCAP
-    if args.read:
-        print(f"Reading packets from {args.read}...")
-        packets = rdpcap(args.read)
-        for packet in packets:
-            packet_callback(packet)
-        detect_unusual_traffic()
+    if 'read' in options:
+        clear_screen()
+        print_banner()
+        print(f"\n{Colors.BLUE}Reading packets from {options['read']}...{Colors.ENDC}")
+        
+        try:
+            packets = rdpcap(options['read'])
+            total_packets_to_read = len(packets)
+            
+            print(f"Found {total_packets_to_read} packets in file")
+            
+            # Process each packet
+            for i, packet in enumerate(packets):
+                packet_callback(packet)
+                if i % 100 == 0:
+                    progress = (i / total_packets_to_read) * 100
+                    sys.stdout.write(f"\r{Colors.BLUE}Progress: {progress:.1f}% ({i}/{total_packets_to_read} packets){Colors.ENDC}")
+                    sys.stdout.flush()
+            
+            detect_unusual_traffic()
+            print(f"\n\n{Colors.GREEN}✓ Analysis complete!{Colors.ENDC}")
+            
+        except Exception as e:
+            print(f"\n{Colors.RED}Error reading PCAP file: {e}{Colors.ENDC}")
+            sys.exit(1)
     else:
+        # Live capture
+        clear_screen()
+        print_banner()
+        
         # Print sniffing parameters
-        print(f"Starting capture with parameters:")
-        print(f"  Interface: {args.interface or 'default'}")
-        print(f"  Count: {'unlimited' if args.count == 0 else args.count}")
-        print(f"  Timeout: {'none' if args.timeout == 0 else f'{args.timeout}s'}")
-        print(f"  Filter: {args.filter or 'none'}")
-        print(f"  PCAP output: {args.pcap or 'none'}")
-        print("\nPress Ctrl+C to stop capture\n")
+        print(f"\n{Colors.BOLD}STARTING CAPTURE{Colors.ENDC}")
+        print(f"  Interface: {options.get('interface') or 'default'}")
+        print(f"  Count: {'unlimited' if options.get('count', 0) == 0 else options.get('count')}")
+        timeout_val = 'none' if options.get('timeout', 0) == 0 else f"{options.get('timeout')}s"
+        print(f"  Timeout: {timeout_val}")
+        print(f"  Filter: {options.get('filter') or 'none'}")
+        print(f"  PCAP output: {options.get('pcap') or 'none'}")
+        print(f"\n{Colors.YELLOW}Press Ctrl+C to stop capture{Colors.ENDC}\n")
         
         # Start sniffing
         try:
             packets = sniff(
-                iface=args.interface,
-                count=args.count if args.count > 0 else None,
-                timeout=args.timeout if args.timeout > 0 else None,
-                filter=args.filter if args.filter else None,
+                iface=options.get('interface'),
+                count=options.get('count') if options.get('count', 0) > 0 else None,
+                timeout=options.get('timeout') if options.get('timeout', 0) > 0 else None,
+                filter=options.get('filter'),
                 prn=packet_callback,
-                store=bool(args.pcap),
+                store=bool(options.get('pcap')),
                 stop_filter=lambda p: not sniff_active
             )
             
             # Save PCAP if requested
-            if args.pcap and packets:
-                wrpcap(args.pcap, packets)
-                print(f"\nSaved {len(packets)} packets to {args.pcap}")
+            if options.get('pcap') and packets:
+                wrpcap(options.get('pcap'), packets)
+                print(f"\n{Colors.GREEN}✓ Saved {len(packets)} packets to {options.get('pcap')}{Colors.ENDC}")
                 
         except Exception as e:
-            print(f"\nError during packet capture: {e}")
+            print(f"\n{Colors.RED}Error during packet capture: {e}{Colors.ENDC}")
+            sys.exit(1)
     
     # Calculate session duration
     session_duration = time.time() - start_time
@@ -306,12 +581,30 @@ def main():
     print_summary_report()
     
     # Generate visualizations
-    if args.output:
+    if options.get('output'):
         try:
-            generate_visualizations(args.output)
-            print(f"\nVisualizations saved to {args.output} directory")
+            generate_visualizations(options.get('output'))
         except Exception as e:
-            print(f"\nError generating visualizations: {e}")
+            print(f"\n{Colors.RED}Error generating visualizations: {e}{Colors.ENDC}")
+    
+    print(f"\n{Colors.GREEN}Session completed. Thank you for using Snifflyzer!{Colors.ENDC}")
+    
+    # Ask if user wants to return to main menu
+    restart = input(f"\n{Colors.GREEN}Return to main menu? [Y/n]: {Colors.ENDC}").lower()
+    if restart != 'n' and restart != 'no':
+        # Reset global variables
+        global packet_stats, ip_connections, dns_queries, arp_cache, login_attempts, suspicious_activities, total_packets, severity_counts
+        packet_stats = Counter()
+        ip_connections = defaultdict(Counter)
+        dns_queries = {}
+        arp_cache = {}
+        login_attempts = defaultdict(Counter)
+        suspicious_activities = []
+        total_packets = 0
+        severity_counts = {"LOW": 0, "MEDIUM": 0, "HIGH": 0}
+        
+        # Return to main menu
+        main()
 
 
 if __name__ == "__main__":
